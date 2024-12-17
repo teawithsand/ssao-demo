@@ -9,14 +9,13 @@ uniform sampler2D texNoise;
 
 uniform vec3 samples[64];
 
-// parameters (you'd probably want to use them as uniforms to more easily tweak the effect)
-int kernelSize = 64;
-float radius = 0.5;
-float bias = 0.025;
+uniform int kernelSize;
+uniform float radius;
+uniform float bias;
 
 uniform float screenWidth;
 uniform float screenHeight;
-
+uniform bool disableRangeCheck;
 
 uniform mat4 projection;
 
@@ -50,7 +49,10 @@ void main()
         float sampleDepth = texture(gPosition, offset.xy).z; // get depth value of kernel sample
         
         // range check & accumulate
-        float rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleDepth));
+        float rangeCheck = 1;
+        if(!disableRangeCheck) {
+            rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleDepth));
+        }
         occlusion += (sampleDepth >= samplePos.z + bias ? 1.0 : 0.0) * rangeCheck;           
     }
     occlusion = 1.0 - (occlusion / kernelSize);

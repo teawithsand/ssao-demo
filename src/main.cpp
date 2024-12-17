@@ -26,8 +26,8 @@ void renderQuad();
 void renderCube();
 
 // settings
-const unsigned int SCR_WIDTH = 800;
-const unsigned int SCR_HEIGHT = 600;
+const unsigned int SCR_WIDTH = 1920 / 3 * 2;
+const unsigned int SCR_HEIGHT = 1080 / 3 * 2;
 
 // camera
 Camera camera(glm::vec3(0.0f, 0.0f, 5.0f));
@@ -44,10 +44,28 @@ float ourLerp(float a, float b, float f)
     return a + f * (b - a);
 }
 
+glm::vec3 lightPos = glm::vec3(2.0, 4.0, -2.0);
+bool ssaoVsync = true;
 bool cursorEnabled = false;
-bool ssaoBypass = true;
+bool ssaoBypass = false;
 bool ssaoSkip = false;
+bool disableRangeCheck = false;
+int ssaoPointCount = 64;
 int ssaoBlurRadius = 2;
+float ssaoRadius = 0.5;
+float ssaoBias = 0.025;
+float objectScale = 1;
+float objectTranslateX = 0;
+float objectTranslateY = 0;
+float objectTranslateZ = 0;
+
+float objectRotateX = 0;
+float objectRotateY = 0;
+float objectRotateZ = 0;
+
+float cubeScale = 7.5;
+
+float frameRenderTime = 0;
 
 void imgui_frame()
 {
@@ -59,12 +77,55 @@ void imgui_frame()
     ImGui::SetNextWindowBgAlpha(0.8f);
     ImGui::Begin("Control", nullptr, imguiWindowFlags);
 
+    if (ImGui::CollapsingHeader("Cube"))
+    {
+        ImGui::SliderFloat("Cube scale", &cubeScale, 5, 15);
+    }
+
+      if (ImGui::CollapsingHeader("Light"))
+    {
+        ImGui::SliderFloat("Light X", &lightPos.x, -10, 10);
+        ImGui::SliderFloat("Light Y", &lightPos.y, -10, 10);
+        ImGui::SliderFloat("Light Z", &lightPos.z, -10, 10);
+    }
+
+    if (ImGui::CollapsingHeader("Object"))
+    {
+        ImGui::SliderFloat("Object scale", &objectScale, 0.05, 2);
+        ImGui::SliderFloat("Object X", &objectTranslateX, -10, 10);
+        ImGui::SliderFloat("Object Y", &objectTranslateY, -10, 10);
+        ImGui::SliderFloat("Object Z", &objectTranslateZ, -10, 10);
+
+        ImGui::SliderFloat("Object rotate X (deg)", &objectRotateX, -180, 180);
+        ImGui::SliderFloat("Object rotate Y (deg)", &objectRotateY, -180, 180);
+        ImGui::SliderFloat("Object rotate Z (deg)", &objectRotateZ, -180, 180);
+    }
+
     if (ImGui::CollapsingHeader("SSAO"))
     {
         ImGui::Checkbox("Show only SSAO result", &ssaoBypass);
         ImGui::Checkbox("Omit SSAO", &ssaoSkip);
+        ImGui::Checkbox("Disable range check", &disableRangeCheck);
         ImGui::SliderInt("Blur SSAO", &ssaoBlurRadius, 0, 5);
+        ImGui::SliderInt("SSAO point count", &ssaoPointCount, 1, 64);
+        ImGui::SliderFloat("SSAO check radius", &ssaoRadius, 0.1, 2);
+        ImGui::SliderFloat("SSAO check bias", &ssaoBias, 0.0, 0.075);
     }
+
+    if(ImGui::Button("Hide cursor")) {
+        firstMouse = true;
+        cursorEnabled = false;
+    }
+
+
+    if(ImGui::Button("Disable vsync")) {
+        glfwSwapInterval(0);
+        ssaoVsync = false;
+    }
+
+    ImGui::Text("Vsync: %s", ssaoVsync ? "true" : "false");
+    ImGui::Text("Frame render time: %f ms", frameRenderTime * 1000);
+    ImGui::Text("FPS: %f", 1/frameRenderTime);
 
     ImGui::End();
     ImGui::Render();
@@ -131,6 +192,7 @@ int main()
     // load models
     // -----------
     Model backpack(FileSystem::getPath("resources/objects/backpack/backpack.obj"));
+    // Model backpack(FileSystem::getPath("resources/objects/vampire/dancing_vampire.dae"));
 
     // configure g-buffer framebuffer
     // ------------------------------
@@ -240,7 +302,7 @@ int main()
 
     // lighting info
     // -------------
-    glm::vec3 lightPos = glm::vec3(2.0, 4.0, -2.0);
+    // glm::vec3 lightPos = glm::vec3(2.0, 4.0, -2.0);
     glm::vec3 lightColor = glm::vec3(0.2, 0.2, 0.7);
 
     // shader configuration
@@ -257,7 +319,6 @@ int main()
     shaderSSAOBlur.use();
     shaderSSAOBlur.setInt("ssaoInput", 0);
 
-
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -271,6 +332,8 @@ int main()
         float currentFrame = static_cast<float>(glfwGetTime());
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+
+        frameRenderTime = deltaTime;
 
         // input
         // -----
@@ -294,16 +357,20 @@ int main()
         // room cube
         model = glm::mat4(1.0f);
         model = glm::translate(model, glm::vec3(0.0, 7.0f, 0.0f));
-        model = glm::scale(model, glm::vec3(7.5f, 7.5f, 7.5f));
+        model = glm::scale(model, glm::vec3(cubeScale, cubeScale, cubeScale));
         shaderGeometryPass.setMat4("model", model);
         shaderGeometryPass.setInt("invertedNormals", 1); // invert normals as we're inside the cube
         renderCube();
         shaderGeometryPass.setInt("invertedNormals", 0);
         // backpack model on the floor
         model = glm::mat4(1.0f);
-        model = glm::translate(model, glm::vec3(0.0f, 0.5f, 0.0));
+        model = glm::translate(model, glm::vec3(objectTranslateX, objectTranslateY, objectTranslateZ));
         model = glm::rotate(model, glm::radians(-90.0f), glm::vec3(1.0, 0.0, 0.0));
-        model = glm::scale(model, glm::vec3(1.0f));
+        model = glm::rotate(model, glm::radians(objectRotateX), glm::vec3(1.0, 0.0, 0.0));
+        model = glm::rotate(model, glm::radians(objectRotateY), glm::vec3(0.0, 1.0, 0.0));
+        model = glm::rotate(model, glm::radians(objectRotateZ), glm::vec3(0.0, 0.0, 1.0));
+        
+        model = glm::scale(model, glm::vec3(objectScale));
         shaderGeometryPass.setMat4("model", model);
         backpack.Draw(shaderGeometryPass);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -313,6 +380,10 @@ int main()
         glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
         glClear(GL_COLOR_BUFFER_BIT);
         shaderSSAO.use();
+        shaderSSAO.setBool("disableRangeCheck", disableRangeCheck);
+        shaderSSAO.setInt("kernelSize", ssaoPointCount);
+        shaderSSAO.setFloat("radius", ssaoRadius);
+        shaderSSAO.setFloat("bias", ssaoBias);
         int width;
         int height;
         glfwGetFramebufferSize(window, &width, &height);
@@ -518,9 +589,15 @@ void processInput(GLFWwindow *window)
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera.ProcessKeyboard(RIGHT, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS)
+    {
+        firstMouse = true;
         cursorEnabled = false;
+    }
     if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS)
+    {
+        firstMouse = true;
         cursorEnabled = true;
+    }
 }
 
 // glfw: whenever the window size changed (by OS or user resize) this callback function executes
@@ -536,7 +613,8 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 // -------------------------------------------------------
 void mouse_callback(GLFWwindow *window, double xposIn, double yposIn)
 {
-    if(cursorEnabled) return;
+    if (cursorEnabled)
+        return;
 
     float xpos = static_cast<float>(xposIn);
     float ypos = static_cast<float>(yposIn);
